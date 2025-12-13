@@ -1,0 +1,36 @@
+{
+  "@@locale": "zh",
+  "@@author": "L4D2 VPK Manager Team",
+  "@@version": "1.0.0",
+  "appTitle": "L4D2 VPK 管理器",
+  "appDescription": "L4D2 VPK文件管理工具",
+  "directoryPathLabel": "L4D2 目录路径",
+  "browseFolder": "浏览文件夹",
+  "loading": "加载中...",
+  "error": "错误: {error}",
+  "@error": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "localVpkFiles": "本地VPK文件",
+  "localVpkFilesSubtitle": "所选目录中的本地VPK文件",
+  "noLocalVpkFiles": "未找到VPK文件",
+  "workshopFiles": "创意工坊文件",
+  "workshopFilesSubtitle": "来自Steam创意工坊的VPK文件",
+  "noWorkshopFiles": "未找到创意工坊文件",
+  "fileSize": "{size} MB",
+  "@fileSize": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "selectDirectory": "选择L4D2目录",
+  "cancel": "取消",
+  "ok": "确定",
+  "enterFolderPath": "输入文件夹路径"
+}

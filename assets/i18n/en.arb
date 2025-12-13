@@ -1,0 +1,36 @@
+{
+  "@@locale": "en",
+  "@@author": "L4D2 VPK Manager Team",
+  "@@version": "1.0.0",
+  "appTitle": "L4D2 VPK Manager",
+  "appDescription": "A tool to manage L4D2 VPK files",
+  "directoryPathLabel": "L4D2 directory path",
+  "browseFolder": "Browse folder",
+  "loading": "Loading...",
+  "error": "Error: {error}",
+  "@error": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "localVpkFiles": "Local VPK Files",
+  "localVpkFilesSubtitle": "Local VPK files in the selected directory",
+  "noLocalVpkFiles": "No VPK files found",
+  "workshopFiles": "Workshop Files",
+  "workshopFilesSubtitle": "VPK files from Steam Workshop",
+  "noWorkshopFiles": "No workshop files found",
+  "fileSize": "{size} MB",
+  "@fileSize": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "selectDirectory": "Select L4D2 Directory",
+  "cancel": "Cancel",
+  "ok": "OK",
+  "enterFolderPath": "Enter folder path"
+}
