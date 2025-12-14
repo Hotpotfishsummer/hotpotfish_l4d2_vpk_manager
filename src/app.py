@@ -9,7 +9,7 @@ from features.vpk_manager.viewmodels.vpk_manager_viewmodel import VpkManagerView
 from core.localization import localization
 
 
-def main(page: ft.Page):
+def main(page: "ft.Page"):
     """Main application entry point"""
     
     # Initialize localization first
@@ -41,11 +41,3 @@ def main(page: ft.Page):
     print(f"UI built: {type(ui)}")
     page.add(ui)
     print("UI added to page")
-
-
-if __name__ == "__main__":
-    try:
-        ft.app(target=main)
-    except Exception as e:
-        print(f"Error running app: {e}")
-        exit(1)

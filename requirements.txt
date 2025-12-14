@@ -1,8 +1,11 @@
-flet==0.24.1
-flet-core==0.24.1
-flet-runtime==0.24.1
+flet==0.28.3
 requests>=2.32.5
 pyyaml>=6.0.3
 python-dotenv>=1.2.1
 py7zr>=0.20.0
 vpk>=1.4.0
+zstandard>=0.21.0
+packaging>=24.0
+cookiecutter>=2.6.0,<3.0.0
+qrcode>=7.4.2,<8.0.0
+watchdog>=4.0.0,<5.0.0

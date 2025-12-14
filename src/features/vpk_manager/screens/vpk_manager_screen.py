@@ -1,7 +1,13 @@
 """VPK Manager screen"""
 
-import flet as ft
+try:
+    import flet as ft
+except ImportError:
+    print("ERROR: flet module not found. Please install it with: pip install flet")
+    raise
+
 from features.vpk_manager.viewmodels.vpk_manager_viewmodel import VpkManagerViewModel, VpkFile
+from features.vpk_manager.services.vpk_export_service import VpkExportService
 from core.localization import localization
 
 
@@ -27,13 +33,14 @@ class VpkManagerScreen:
         
         # Main container reference for dynamic updates
         self._main_column = None
+        self._action_buttons_row = None  # Will be created in build()
         
         # Load VPK files if directory was saved
         if self._current_directory:
             print(f"VpkManagerScreen.__init__: loading VPK files from saved directory: {self._current_directory}")
             self._viewmodel.load_vpk_files_sync(self._current_directory)
     
-    def build(self) -> ft.Container:
+    def build(self) -> "ft.Container":
         """Build the UI"""
         # Create directory input with current locale
         self._directory_input = ft.TextField(
@@ -55,7 +62,7 @@ class VpkManagerScreen:
             padding=10,
         ) if self._page is not None else ft.Container()
     
-    def _build_top_bar(self, directory_input: ft.TextField) -> ft.Row:
+    def _build_top_bar(self, directory_input: "ft.TextField") -> "ft.Row":
         """Build top bar with directory input and folder button"""
         def on_folder_click(e):
             """Handle folder button click - open directory picker"""
@@ -70,14 +77,14 @@ class VpkManagerScreen:
         return ft.Row([
             directory_input,
             ft.IconButton(
-                icon=ft.icons.FOLDER_OPEN,
+                icon=ft.Icons.FOLDER_OPEN,
                 tooltip=browse_text,
                 on_click=on_folder_click,
             ),
         ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
     
-    def _build_content_area(self) -> ft.Container:
-        """Build content area with collapsible sections using ExpansionPanel"""
+    def _build_content_area(self) -> "ft.Container":
+        """Build content area with action buttons and collapsible sections"""
         if self._viewmodel.is_loading:
             return ft.Container(
                 content=ft.Column([
@@ -90,7 +97,7 @@ class VpkManagerScreen:
         if self._viewmodel.has_error:
             return ft.Container(
                 content=ft.Column([
-                    ft.Icon(ft.icons.ERROR, color='red', size=50),
+                    ft.Icon(ft.Icons.ERROR, color='red', size=50),
                     ft.Text(
                         localization.t('error', error=self._viewmodel.error_message),
                         color='red',
@@ -100,6 +107,32 @@ class VpkManagerScreen:
                 expand=True,
             )
         
+        # Build the expansion list
+        expansion_list = self._build_expansion_list()
+        
+        # Build action buttons row
+        action_buttons_row = self._build_action_buttons()
+        action_buttons_row.visible = self._viewmodel.has_selected_files or self._viewmodel.is_exporting
+        
+        # Store reference for later updates
+        self._action_buttons_row = action_buttons_row
+        
+        # Wrap in a scrollable column with action buttons
+        return ft.Container(
+            content=ft.Column(
+                controls=[
+                    action_buttons_row,
+                    expansion_list,
+                ],
+                expand=True,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            expand=True,
+            padding=0,
+        )
+    
+    def _build_expansion_list(self) -> "ft.ExpansionPanelList":
+        """Build expansion panel list for VPK files"""
         # Create expansion panels
         panels = []
         
@@ -119,12 +152,12 @@ class VpkManagerScreen:
         def on_upload_click(e):
             """Handle upload button click"""
             self._archive_picker.pick_files(
-                allowed_extensions=['zip', '7z']
+                allowed_extensions=['zip', '7z', 'tar', 'zst']
             )
         
         # Upload button for archive files
         upload_button = ft.IconButton(
-            icon=ft.icons.UPLOAD_FILE,
+            icon=ft.Icons.UPLOAD_FILE,
             tooltip=localization.t('uploadArchive') if localization.t('uploadArchive') != 'uploadArchive' else 'Upload Archive',
             on_click=on_upload_click,
             disabled=not self._current_directory,
@@ -211,19 +244,83 @@ class VpkManagerScreen:
             divider_color='#333333',
         )
         
-        # Wrap in a scrollable column to enable mouse wheel scrolling
-        return ft.Container(
-            content=ft.Column(
-                controls=[expansion_list],
-                expand=True,
-                scroll=ft.ScrollMode.AUTO,
-            ),
-            expand=True,
-            padding=0,
-        )
+        return expansion_list
     
-    def _build_local_vpk_item(self, vpk: VpkFile) -> ft.Container:
-        """Build a single local VPK item with thumbnail, filename, and action buttons"""
+    def _build_action_buttons(self) -> "ft.Row":
+        """Build action buttons for selected files"""
+        def on_export_click(e):
+            """Handle export button click"""
+            if self._viewmodel.is_exporting:
+                print("on_export_click: already exporting, ignoring click")
+                return
+            
+            selected_files = self._viewmodel.get_selected_files()
+            if not selected_files:
+                print("on_export_click: no files selected")
+                return
+            
+            print(f"on_export_click: exporting {len(selected_files)} files")
+            downloads_dir = VpkExportService.get_downloads_directory()
+            # Use the ViewModel's export method which handles state management
+            self._viewmodel.export_selected_vpk_files_sync(downloads_dir)
+        
+        def on_delete_click(e):
+            """Handle delete selected files button click"""
+            if self._viewmodel.is_exporting:
+                print("on_delete_click: already processing, ignoring click")
+                return
+            
+            selected_files = self._viewmodel.get_selected_files()
+            if not selected_files:
+                print("on_delete_click: no files selected")
+                return
+            
+            print(f"on_delete_click: deleting {len(selected_files)} files")
+            # Use the ViewModel's delete method which handles state management
+            self._viewmodel.delete_selected_vpk_files_sync()
+        
+        # Build action buttons with export progress indicator
+        buttons = []
+        
+        if self._viewmodel.is_exporting:
+            # Show loading indicator when exporting with elapsed time
+            elapsed_time_text = self._viewmodel.export_elapsed_time_display if self._viewmodel.export_elapsed_time > 0 else '初始化中...'
+            buttons.append(
+                ft.Row([
+                    ft.ProgressRing(value=None, width=30, height=30),
+                    ft.Text('正在导出/删除文件...', expand=False),
+                    ft.Text(f'耗时: {elapsed_time_text}', expand=True, text_align=ft.TextAlign.RIGHT, color='#a0a0a0', size=12),
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER, expand=True)
+            )
+        else:
+            # Show normal buttons when not exporting
+            buttons.extend([
+                ft.ElevatedButton(
+                    text='导出',
+                    icon=ft.Icons.DOWNLOAD,
+                    on_click=on_export_click,
+                    bgcolor='#4caf50',
+                    color='white',
+                    disabled=not self._viewmodel.has_selected_files,
+                ),
+                ft.ElevatedButton(
+                    text='删除',
+                    icon=ft.Icons.DELETE,
+                    on_click=on_delete_click,
+                    bgcolor='#f44336',
+                    color='white',
+                    disabled=not self._viewmodel.has_selected_files,
+                ),
+                ft.Text(f"已选择 {self._viewmodel.selected_count} 项", expand=True),
+            ])
+        
+        return ft.Row(buttons, spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    
+    def _build_local_vpk_item(self, vpk: VpkFile) -> "ft.Container":
+        """Build a single local VPK item with checkbox, thumbnail, filename, and action buttons"""
+        # Check if this VPK is selected
+        is_selected = vpk.path in self._viewmodel.selected_vpk_files
+        
         # Build thumbnail image or placeholder
         if vpk.thumbnail_path:
             thumbnail = ft.Image(
@@ -255,7 +352,7 @@ class VpkManagerScreen:
         
         file_info = ft.Column([
             ft.Row([
-                ft.Text(title_text, weight=ft.FontWeight.BOLD, size=12, color=name_text_color),
+                ft.Text(title_text, weight=ft.FontWeight.BOLD, size=16, color=name_text_color),
                 ft.Container(
                     content=ft.Text('已禁用', size=9, color='#ffffff', weight=ft.FontWeight.BOLD),
                     bgcolor='#f44336',
@@ -272,6 +369,11 @@ class VpkManagerScreen:
         ], tight=True, expand=True)
         
         # Create action buttons based on disabled state
+        def on_checkbox_change(e):
+            """Handle checkbox change"""
+            print(f"_build_local_vpk_item: checkbox changed for {vpk.name}, value={e.control.value}")
+            self._viewmodel.toggle_vpk_selection(vpk)
+        
         def on_disable_click(e):
             """Handle disable button click"""
             print(f"_build_local_vpk_item: disabling {vpk.name}")
@@ -287,17 +389,23 @@ class VpkManagerScreen:
             print(f"_build_local_vpk_item: deleting {vpk.name}")
             self._viewmodel.delete_vpk_sync(vpk)
         
+        # Checkbox for selection
+        checkbox = ft.Checkbox(
+            value=is_selected,
+            on_change=on_checkbox_change,
+        )
+        
         if vpk.is_disabled:
             # Show "Enable" and "Delete" buttons for disabled files
             action_buttons = ft.Row([
                 ft.IconButton(
-                    icon=ft.icons.CHECK_CIRCLE,
+                    icon=ft.Icons.CHECK_CIRCLE,
                     tooltip='Enable',
                     on_click=on_enable_click,
                     icon_color='#4caf50',
                 ),
                 ft.IconButton(
-                    icon=ft.icons.DELETE,
+                    icon=ft.Icons.DELETE,
                     tooltip='Delete',
                     on_click=on_delete_click,
                     icon_color='#f44336',
@@ -307,13 +415,13 @@ class VpkManagerScreen:
             # Show "Disable" and "Delete" buttons for enabled files
             action_buttons = ft.Row([
                 ft.IconButton(
-                    icon=ft.icons.BLOCK,
+                    icon=ft.Icons.BLOCK,
                     tooltip='Disable',
                     on_click=on_disable_click,
                     icon_color='#ff9800',
                 ),
                 ft.IconButton(
-                    icon=ft.icons.DELETE,
+                    icon=ft.Icons.DELETE,
                     tooltip='Delete',
                     on_click=on_delete_click,
                     icon_color='#f44336',
@@ -322,6 +430,7 @@ class VpkManagerScreen:
         
         # Build filename and info with action buttons
         item_content = ft.Row([
+            checkbox,
             thumbnail,
             file_info,
             action_buttons,
@@ -339,8 +448,11 @@ class VpkManagerScreen:
             bgcolor=bgcolor,
         )
     
-    def _build_workshop_item(self, workshop: VpkFile) -> ft.Container:
-        """Build a single workshop item with thumbnail and filename"""
+    def _build_workshop_item(self, workshop: VpkFile) -> "ft.Container":
+        """Build a single workshop item with checkbox, thumbnail and filename"""
+        # Check if this workshop file is selected
+        is_selected = workshop.path in self._viewmodel.selected_workshop_files
+        
         # Build thumbnail image or placeholder
         if workshop.thumbnail_path:
             thumbnail = ft.Image(
@@ -352,7 +464,7 @@ class VpkManagerScreen:
         else:
             # Show placeholder if no thumbnail
             thumbnail = ft.Container(
-                content=ft.Icon(ft.icons.IMAGE_NOT_SUPPORTED, size=50, color='#666666'),
+                content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED, size=50, color='#666666'),
                 width=120,
                 height=120,
                 bgcolor='#3a3a3a',
@@ -370,11 +482,23 @@ class VpkManagerScreen:
             title_parts.append(f" - {workshop.addontitle}")
         title_text = ''.join(title_parts)
         
+        # Checkbox for selection
+        def on_checkbox_change(e):
+            """Handle checkbox change"""
+            print(f"_build_workshop_item: checkbox changed for {workshop.name}, value={e.control.value}")
+            self._viewmodel.toggle_workshop_selection(workshop)
+        
+        checkbox = ft.Checkbox(
+            value=is_selected,
+            on_change=on_checkbox_change,
+        )
+        
         item_content = ft.Row([
+            checkbox,
             thumbnail,
             ft.Column([
                 ft.Row([
-                    ft.Text(title_text, weight=ft.FontWeight.BOLD, size=12, color=name_text_color),
+                    ft.Text(title_text, weight=ft.FontWeight.BOLD, size=16, color=name_text_color),
                     ft.Container(
                         content=ft.Text('已禁用', size=9, color='#ffffff', weight=ft.FontWeight.BOLD),
                         bgcolor='#f44336',
@@ -398,7 +522,7 @@ class VpkManagerScreen:
             bgcolor='#1a1a1a' if workshop.is_disabled else '#2d2d2d',
         )
     
-    def _on_folder_selected(self, e: ft.FilePickerResultEvent):
+    def _on_folder_selected(self, e: "ft.FilePickerResultEvent"):
         """Handle folder selection from system file picker"""
         if e.path:
             self._current_directory = e.path
@@ -449,7 +573,7 @@ class VpkManagerScreen:
             dialog.open = True
             self._page.update()
     
-    def _handle_path_selected(self, path: str, dialog: ft.AlertDialog):
+    def _handle_path_selected(self, path: str, dialog: "ft.AlertDialog"):
         """Handle path selection from dialog"""
         import asyncio
         dialog.open = False
@@ -460,13 +584,13 @@ class VpkManagerScreen:
             asyncio.create_task(self._viewmodel.set_directory(path))
         self._on_state_changed()
     
-    def _close_dialog(self, dialog: ft.AlertDialog):
+    def _close_dialog(self, dialog: "ft.AlertDialog"):
         """Close dialog"""
         dialog.open = False
         if self._page:
             self._page.update()
     
-    def set_page(self, page: ft.Page):
+    def set_page(self, page: "ft.Page"):
         """Set page reference for dialogs and file pickers"""
         self._page = page
         # Add file pickers to page
@@ -478,7 +602,7 @@ class VpkManagerScreen:
     def _on_state_changed(self):
         """Handle state changes from ViewModel"""
         # Rebuild the content area when state changes
-        print(f"_on_state_changed: called, is_loading={self._viewmodel.is_loading}")
+        print(f"_on_state_changed: called, is_loading={self._viewmodel.is_loading}, is_exporting={self._viewmodel.is_exporting}, selected_count={self._viewmodel.selected_count}")
         if self._page and self._main_column:
             # Rebuild the content area with new data
             print(f"_on_state_changed: rebuilding content area")
@@ -489,7 +613,7 @@ class VpkManagerScreen:
             self._page.update()
             print(f"_on_state_changed: page.update() completed")
     
-    def _on_archive_selected(self, e: ft.FilePickerResultEvent):
+    def _on_archive_selected(self, e: "ft.FilePickerResultEvent"):
         """Handle archive file selection from file picker"""
         if e.files:
             selected_file = e.files[0]

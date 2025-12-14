@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 import zipfile
 import shutil
+import tarfile
 from core.viewmodels.base_viewmodel import BaseViewModel
 from core.services.storage_service import StorageService
 from features.vpk_manager.services.vpk_metadata_service import VpkMetadataService
@@ -14,6 +15,12 @@ try:
     HAS_7ZR = True
 except ImportError:
     HAS_7ZR = False
+
+try:
+    import zstandard as zstd
+    HAS_ZSTD = True
+except ImportError:
+    HAS_ZSTD = False
 
 
 @dataclass
@@ -44,8 +51,14 @@ class VpkManagerViewModel(BaseViewModel):
         self._vpk_files: List[VpkFile] = []
         self._workshop_files: List[VpkFile] = []
         self._is_loading = False
+        self._is_exporting = False  # Track export state
+        self._export_elapsed_time: float = 0.0  # Track export elapsed time in seconds
         self._error_message: str = ''
         self._selected_file: Optional[VpkFile] = None
+        
+        # Selection state - track which files are selected
+        self._selected_vpk_files: set = set()  # Store file paths of selected local VPK files
+        self._selected_workshop_files: set = set()  # Store file paths of selected workshop files
     
     # Getters
     @property
@@ -65,6 +78,27 @@ class VpkManagerViewModel(BaseViewModel):
         return self._is_loading
     
     @property
+    def is_exporting(self) -> bool:
+        """Check if export is in progress"""
+        return self._is_exporting
+    
+    @property
+    def export_elapsed_time(self) -> float:
+        """Get export elapsed time in seconds"""
+        return self._export_elapsed_time
+    
+    @property
+    def export_elapsed_time_display(self) -> str:
+        """Get formatted export elapsed time for display"""
+        elapsed = self._export_elapsed_time
+        if elapsed < 60:
+            return f"{elapsed:.1f}s"
+        else:
+            minutes = int(elapsed // 60)
+            seconds = elapsed % 60
+            return f"{minutes}m {seconds:.1f}s"
+    
+    @property
     def has_error(self) -> bool:
         return len(self._error_message) > 0
     
@@ -75,6 +109,26 @@ class VpkManagerViewModel(BaseViewModel):
     @property
     def selected_file(self) -> Optional[VpkFile]:
         return self._selected_file
+    
+    @property
+    def selected_vpk_files(self) -> set:
+        """Get set of selected local VPK file paths"""
+        return self._selected_vpk_files
+    
+    @property
+    def selected_workshop_files(self) -> set:
+        """Get set of selected workshop file paths"""
+        return self._selected_workshop_files
+    
+    @property
+    def has_selected_files(self) -> bool:
+        """Check if any files are selected"""
+        return len(self._selected_vpk_files) > 0 or len(self._selected_workshop_files) > 0
+    
+    @property
+    def selected_count(self) -> int:
+        """Get total count of selected files"""
+        return len(self._selected_vpk_files) + len(self._selected_workshop_files)
     
     # Business logic methods
     def set_directory_sync(self, directory: str):
@@ -92,6 +146,9 @@ class VpkManagerViewModel(BaseViewModel):
             self._vpk_files = self._get_vpk_files(directory)
             self._workshop_files = self._get_workshop_files(directory)
             self._error_message = ''
+            # Clear selections when loading new directory
+            self._selected_vpk_files.clear()
+            self._selected_workshop_files.clear()
         except Exception as e:
             self._error_message = str(e)
         finally:
@@ -276,8 +333,12 @@ class VpkManagerViewModel(BaseViewModel):
                 success = self._extract_zip(archive_path)
             elif archive_path.lower().endswith('.7z'):
                 success = self._extract_7z(archive_path)
+            elif archive_path.lower().endswith('.tar.zst') or archive_path.lower().endswith('.tar.zstd'):
+                success = self._extract_tar_zst(archive_path)
+            elif archive_path.lower().endswith('.tar'):
+                success = self._extract_tar(archive_path)
             else:
-                self._error_message = 'Unsupported archive format. Only ZIP and 7Z are supported.'
+                self._error_message = 'Unsupported archive format. Supported formats: ZIP, 7Z, TAR.ZST, TAR'
                 return False
             
             if success:
@@ -361,6 +422,69 @@ class VpkManagerViewModel(BaseViewModel):
             print(f"_extract_7z: {self._error_message}")
             return False
     
+    def _extract_tar_zst(self, tar_zst_path: str) -> bool:
+        """Extract TAR.ZST archive to local addons directory (overwrite existing files)"""
+        if not HAS_ZSTD:
+            self._error_message = 'zstandard library not installed. Install with: pip install zstandard'
+            print(f"_extract_tar_zst: {self._error_message}")
+            return False
+        
+        try:
+            addons_path = Path(self._directory_path) / 'left4dead2' / 'addons'
+            
+            # Ensure addons directory exists
+            addons_path.mkdir(parents=True, exist_ok=True)
+            
+            print(f"_extract_tar_zst: extracting {tar_zst_path} to {addons_path}")
+            
+            # Decompress zstd and extract tar
+            dctx = zstd.ZstdDecompressor()
+            with open(tar_zst_path, 'rb') as f_in:
+                with dctx.stream_reader(f_in) as reader:
+                    with tarfile.open(fileobj=reader, mode='r|') as tar:
+                        # Extract all files
+                        tar.extractall(path=addons_path)
+                        
+                        # Log tar info
+                        print(f"_extract_tar_zst: extracted files from archive")
+            
+            print(f"_extract_tar_zst: successfully completed")
+            return True
+        except Exception as e:
+            self._error_message = f'Error extracting TAR.ZST: {str(e)}'
+            print(f"_extract_tar_zst: {self._error_message}")
+            return False
+    
+    def _extract_tar(self, tar_path: str) -> bool:
+        """Extract TAR archive to local addons directory (overwrite existing files)"""
+        try:
+            addons_path = Path(self._directory_path) / 'left4dead2' / 'addons'
+            
+            # Ensure addons directory exists
+            addons_path.mkdir(parents=True, exist_ok=True)
+            
+            print(f"_extract_tar: extracting {tar_path} to {addons_path}")
+            
+            # Extract tar archive
+            with tarfile.open(tar_path, 'r') as tar:
+                # Extract all files
+                tar.extractall(path=addons_path)
+                
+                # Log tar info
+                members = tar.getmembers()
+                print(f"_extract_tar: extracted {len(members)} file(s)")
+                for member in members[:10]:  # Log first 10 files
+                    print(f"  - {member.name}")
+                if len(members) > 10:
+                    print(f"  ... and {len(members) - 10} more file(s)")
+            
+            print(f"_extract_tar: successfully completed")
+            return True
+        except Exception as e:
+            self._error_message = f'Error extracting TAR: {str(e)}'
+            print(f"_extract_tar: {self._error_message}")
+            return False
+    
     def disable_vpk_sync(self, vpk_file: VpkFile) -> bool:
         """Disable a VPK file by renaming it to .vpk.disabled"""
         try:
@@ -435,9 +559,130 @@ class VpkManagerViewModel(BaseViewModel):
             self.notify_listeners()
             return False
     
+    def toggle_vpk_selection(self, vpk_file: VpkFile) -> bool:
+        """Toggle selection of a local VPK file. Returns True if selected, False if deselected"""
+        if vpk_file.path in self._selected_vpk_files:
+            self._selected_vpk_files.remove(vpk_file.path)
+            print(f"toggle_vpk_selection: deselected {vpk_file.name}")
+            is_selected = False
+        else:
+            # Deselect workshop files when selecting local VPK
+            self._selected_workshop_files.clear()
+            self._selected_vpk_files.add(vpk_file.path)
+            print(f"toggle_vpk_selection: selected {vpk_file.name}")
+            is_selected = True
+        self.notify_listeners()
+        return is_selected
+    
+    def toggle_workshop_selection(self, workshop_file: VpkFile) -> bool:
+        """Toggle selection of a workshop file. Returns True if selected, False if deselected"""
+        if workshop_file.path in self._selected_workshop_files:
+            self._selected_workshop_files.remove(workshop_file.path)
+            print(f"toggle_workshop_selection: deselected {workshop_file.name}")
+            is_selected = False
+        else:
+            # Deselect local VPK files when selecting workshop file
+            self._selected_vpk_files.clear()
+            self._selected_workshop_files.add(workshop_file.path)
+            print(f"toggle_workshop_selection: selected {workshop_file.name}")
+            is_selected = True
+        self.notify_listeners()
+        return is_selected
+    
+    def clear_selection(self):
+        """Clear all selections"""
+        self._selected_vpk_files.clear()
+        self._selected_workshop_files.clear()
+        self.notify_listeners()
+    
+    def get_selected_files(self) -> List[VpkFile]:
+        """Get list of selected VpkFile objects"""
+        selected_files = []
+        
+        # Get selected local VPK files
+        for vpk_file in self._vpk_files:
+            if vpk_file.path in self._selected_vpk_files:
+                selected_files.append(vpk_file)
+        
+        # Get selected workshop files
+        for workshop_file in self._workshop_files:
+            if workshop_file.path in self._selected_workshop_files:
+                selected_files.append(workshop_file)
+        
+        return selected_files
+    
+    def export_selected_vpk_files_sync(self, output_dir: str) -> bool:
+        """Export selected VPK files to 7z archive (synchronous)"""
+        from features.vpk_manager.services.vpk_export_service import VpkExportService
+        
+        selected_files = self.get_selected_files()
+        if not selected_files:
+            self._error_message = 'No files selected for export'
+            self.notify_listeners()
+            return False
+        
+        self._is_exporting = True
+        self.notify_listeners()
+        
+        try:
+            success, message, elapsed_time = VpkExportService.export_vpk_files_to_7z(selected_files, output_dir)
+            self._export_elapsed_time = elapsed_time
+            if success:
+                self._error_message = ''
+                # Clear selection after successful export
+                self.clear_selection()
+                print(f"export_selected_vpk_files_sync: export completed successfully in {elapsed_time:.2f} seconds")
+            else:
+                self._error_message = message
+                print(f"export_selected_vpk_files_sync: export failed - {message}")
+            
+            return success
+        except Exception as e:
+            self._error_message = f'Error exporting VPK files: {str(e)}'
+            print(f"export_selected_vpk_files_sync: {self._error_message}")
+            return False
+        finally:
+            self._is_exporting = False
+            self.notify_listeners()
+    
+    def delete_selected_vpk_files_sync(self) -> bool:
+        """Delete selected VPK files (synchronous)"""
+        from features.vpk_manager.services.vpk_export_service import VpkExportService
+        
+        selected_files = self.get_selected_files()
+        if not selected_files:
+            self._error_message = 'No files selected for deletion'
+            self.notify_listeners()
+            return False
+        
+        self._is_exporting = True  # Reuse exporting flag to block operations
+        self.notify_listeners()
+        
+        try:
+            success, message = VpkExportService.delete_vpk_files(selected_files)
+            if success:
+                self._error_message = ''
+                # Reload VPK files to reflect deletions
+                self.load_vpk_files_sync(self._directory_path)
+                print(f"delete_selected_vpk_files_sync: deletion completed successfully")
+            else:
+                self._error_message = message
+                print(f"delete_selected_vpk_files_sync: deletion failed - {message}")
+            
+            return success
+        except Exception as e:
+            self._error_message = f'Error deleting VPK files: {str(e)}'
+            print(f"delete_selected_vpk_files_sync: {self._error_message}")
+            return False
+        finally:
+            self._is_exporting = False
+            self.notify_listeners()
+    
     def dispose(self):
         """Clean up resources"""
         super().dispose()
         self._vpk_files.clear()
         self._workshop_files.clear()
         self._selected_file: Optional[VpkFile] = None
+        self._selected_vpk_files.clear()
+        self._selected_workshop_files.clear()
