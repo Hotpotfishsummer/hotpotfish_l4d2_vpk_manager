@@ -1,7 +1,7 @@
 """VPK Manager screen"""
 
 import flet as ft
-from src.features.vpk_manager.viewmodels.vpk_manager_viewmodel import VpkManagerViewModel
+from features.vpk_manager.viewmodels.vpk_manager_viewmodel import VpkManagerViewModel, VpkFile
 from core.localization import localization
 
 
@@ -21,8 +21,12 @@ class VpkManagerScreen:
         self._local_vpk_expanded = True
         self._workshop_expanded = True
         
-        # File picker
+        # File pickers
         self._folder_picker = ft.FilePicker(on_result=self._on_folder_selected)
+        self._archive_picker = ft.FilePicker(on_result=self._on_archive_selected)
+        
+        # Main container reference for dynamic updates
+        self._main_column = None
         
         # Load VPK files if directory was saved
         if self._current_directory:
@@ -39,11 +43,14 @@ class VpkManagerScreen:
             value=self._current_directory,
         )
         
+        # Create main column and store reference
+        self._main_column = ft.Column([
+            self._build_top_bar(self._directory_input),
+            self._build_content_area(),
+        ], expand=True, spacing=10)
+        
         return ft.Container(
-            content=ft.Column([
-                self._build_top_bar(self._directory_input),
-                self._build_content_area(),
-            ], expand=True, spacing=10),
+            content=self._main_column,
             expand=True,
             padding=10,
         ) if self._page is not None else ft.Container()
@@ -70,7 +77,7 @@ class VpkManagerScreen:
         ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
     
     def _build_content_area(self) -> ft.Container:
-        """Build content area with collapsible sections"""
+        """Build content area with collapsible sections using ExpansionPanel"""
         if self._viewmodel.is_loading:
             return ft.Container(
                 content=ft.Column([
@@ -93,88 +100,70 @@ class VpkManagerScreen:
                 expand=True,
             )
         
-        return ft.Container(
-            content=ft.Column([
-                self._build_local_vpk_section(),
-                self._build_workshop_section(),
-            ], spacing=10, expand=True, scroll=ft.ScrollMode.AUTO),
-            expand=True,
-        )
-    
-    def _build_local_vpk_section(self) -> ft.Card:
-        """Build collapsible section for local VPK files"""
-        def toggle_local_vpk(e):
-            self._local_vpk_expanded = not self._local_vpk_expanded
-            self._on_state_changed()
+        # Create expansion panels
+        panels = []
         
-        local_title = localization.t('localVpkFiles')
-        local_subtitle = localization.t('localVpkFilesSubtitle')
-        no_files = localization.t('noLocalVpkFiles')
-        print(f"_build_local_vpk_section: title='{local_title}', subtitle='{local_subtitle}', nofiles='{no_files}'")
-        
-        vpk_list = ft.Column(
+        # Local VPK Files Panel
+        local_vpk_content = ft.Column(
             controls=[
-                ft.ListTile(
-                    title=ft.Text(vpk.name, size=12),
-                    subtitle=ft.Text(localization.t('fileSize', size=f'{vpk.size / (1024*1024):.2f}'), size=11),
-                    trailing=ft.Icon(ft.icons.FILE_PRESENT, size=18),
-                )
+                self._build_local_vpk_item(vpk)
                 for vpk in self._viewmodel.vpk_files
             ],
             spacing=5,
         ) if self._viewmodel.vpk_files else ft.Text(
-            no_files,
+            localization.t('noLocalVpkFiles'),
             color='gray',
             size=14,
         )
         
-        header = ft.Row([
-            ft.Icon(
-                ft.icons.EXPAND_MORE if self._local_vpk_expanded else ft.icons.CHEVRON_RIGHT,
-                size=20,
-            ),
-            ft.Column([
-                ft.Text(
-                    f"{local_title} ({len(self._viewmodel.vpk_files)})",
+        def on_upload_click(e):
+            """Handle upload button click"""
+            self._archive_picker.pick_files(
+                allowed_extensions=['zip', '7z']
+            )
+        
+        # Upload button for archive files
+        upload_button = ft.IconButton(
+            icon=ft.icons.UPLOAD_FILE,
+            tooltip=localization.t('uploadArchive') if localization.t('uploadArchive') != 'uploadArchive' else 'Upload Archive',
+            on_click=on_upload_click,
+            disabled=not self._current_directory,
+        )
+        
+        # Content with upload button
+        content_with_upload = ft.Column([
+            ft.Row([
+                ft.Text(localization.t('localVpkFiles') if localization.t('localVpkFiles') != 'localVpkFiles' else 'Local VPK Files', weight='bold', expand=True),
+                upload_button,
+            ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            local_vpk_content,
+        ], spacing=10)
+        
+        local_vpk_panel = ft.ExpansionPanel(
+            header=ft.ListTile(
+                title=ft.Text(
+                    f"{localization.t('localVpkFiles')} ({len(self._viewmodel.vpk_files)})",
                     weight='bold',
                     size=14,
+                    color='#ffffff',
                 ),
-                ft.Text(local_subtitle, size=11, color='gray'),
-            ], tight=True, expand=True),
-        ], tight=True)
-        
-        header_container = ft.Container(
-            content=header,
-            on_click=toggle_local_vpk,
-            padding=10,
+                subtitle=ft.Text(localization.t('localVpkFilesSubtitle'), size=11, color='#a0a0a0'),
+            ),
+            content=ft.Container(
+                content=content_with_upload,
+                padding=15,
+                border_radius=8,
+            ),
+            expanded=self._local_vpk_expanded,
+            bgcolor='#242424',
+            can_tap_header=True,
         )
+        panels.append(local_vpk_panel)
         
-        content = vpk_list if self._local_vpk_expanded else ft.Container(height=0)
-        
-        return ft.Card(
-            content=ft.Column([
-                header_container,
-                ft.Divider(height=1),
-                ft.Container(
-                    content=content,
-                    padding=10,
-                ),
-            ], spacing=0, tight=True),
-        )
-    
-    def _build_workshop_section(self) -> ft.Card:
-        """Build collapsible section for workshop files"""
-        def toggle_workshop(e):
-            self._workshop_expanded = not self._workshop_expanded
-            self._on_state_changed()
-        
-        workshop_list = ft.Column(
+        # Workshop Files Panel
+        workshop_content = ft.Column(
             controls=[
-                ft.ListTile(
-                    title=ft.Text(workshop.name, size=12),
-                    subtitle=ft.Text(localization.t('fileSize', size=f'{workshop.size / (1024*1024):.2f}'), size=11),
-                    trailing=ft.Icon(ft.icons.CLOUD, size=18),
-                )
+                self._build_workshop_item(workshop)
                 for workshop in self._viewmodel.workshop_files
             ],
             spacing=5,
@@ -184,38 +173,217 @@ class VpkManagerScreen:
             size=14,
         )
         
-        header = ft.Row([
-            ft.Icon(
-                ft.icons.EXPAND_MORE if self._workshop_expanded else ft.icons.CHEVRON_RIGHT,
-                size=20,
-            ),
-            ft.Column([
-                ft.Text(
+        workshop_panel = ft.ExpansionPanel(
+            header=ft.ListTile(
+                title=ft.Text(
                     f"{localization.t('workshopFiles')} ({len(self._viewmodel.workshop_files)})",
                     weight='bold',
                     size=14,
+                    color='#ffffff',
                 ),
-                ft.Text(localization.t('workshopFilesSubtitle'), size=11, color='gray'),
-            ], tight=True, expand=True),
-        ], tight=True)
+                subtitle=ft.Text(localization.t('workshopFilesSubtitle'), size=11, color='#a0a0a0'),
+            ),
+            content=ft.Container(
+                content=workshop_content,
+                padding=15,
+                border_radius=8,
+            ),
+            expanded=self._workshop_expanded,
+            bgcolor='#242424',
+            can_tap_header=True,
+        )
+        panels.append(workshop_panel)
         
-        header_container = ft.Container(
-            content=header,
-            on_click=toggle_workshop,
-            padding=10,
+        # Create expansion panel list with change handler
+        def on_panel_change(e):
+            # Update state based on which panels are expanded
+            # Note: e.data contains the index of the changed panel
+            panel_index = int(e.data) if e.data else -1
+            if panel_index == 0:
+                self._local_vpk_expanded = panels[0].expanded
+            elif panel_index == 1:
+                self._workshop_expanded = panels[1].expanded
+        
+        expansion_list = ft.ExpansionPanelList(
+            controls=panels,
+            on_change=on_panel_change,
+            spacing=12,
+            divider_color='#333333',
         )
         
-        content = workshop_list if self._workshop_expanded else ft.Container(height=0)
+        # Wrap in a scrollable column to enable mouse wheel scrolling
+        return ft.Container(
+            content=ft.Column(
+                controls=[expansion_list],
+                expand=True,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            expand=True,
+            padding=0,
+        )
+    
+    def _build_local_vpk_item(self, vpk: VpkFile) -> ft.Container:
+        """Build a single local VPK item with thumbnail, filename, and action buttons"""
+        # Build thumbnail image or placeholder
+        if vpk.thumbnail_path:
+            thumbnail = ft.Image(
+                src=vpk.thumbnail_path,
+                width=120,
+                height=120,
+                fit=ft.ImageFit.CONTAIN,
+            )
+        else:
+            # Show placeholder if no thumbnail
+            thumbnail = ft.Container(
+                content=ft.Icon(ft.icons.IMAGE_NOT_SUPPORTED, size=50, color='#666666'),
+                width=120,
+                height=120,
+                bgcolor='#3a3a3a',
+                border_radius=8,
+                alignment=ft.alignment.center,
+            )
         
-        return ft.Card(
-            content=ft.Column([
-                header_container,
-                ft.Divider(height=1),
+        # Build filename and info
+        name_text_color = '#888888' if vpk.is_disabled else '#ffffff'
+        info_text_color = '#666666' if vpk.is_disabled else '#a0a0a0'
+        
+        file_info = ft.Column([
+            ft.Row([
+                ft.Text(vpk.name, weight='bold', size=12, color=name_text_color),
                 ft.Container(
-                    content=content,
-                    padding=10,
+                    content=ft.Text('已禁用', size=9, color='#ffffff', weight='bold'),
+                    bgcolor='#f44336',
+                    padding=ft.padding.symmetric(horizontal=6, vertical=2),
+                    border_radius=4,
+                    visible=vpk.is_disabled,
                 ),
-            ], spacing=0, tight=True),
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Text(
+                localization.t('fileSize', size=f'{vpk.size / (1024*1024):.2f}'),
+                size=11,
+                color=info_text_color,
+            ),
+        ], tight=True, expand=True)
+        
+        # Create action buttons based on disabled state
+        def on_disable_click(e):
+            """Handle disable button click"""
+            print(f"_build_local_vpk_item: disabling {vpk.name}")
+            self._viewmodel.disable_vpk_sync(vpk)
+        
+        def on_enable_click(e):
+            """Handle enable button click"""
+            print(f"_build_local_vpk_item: enabling {vpk.name}")
+            self._viewmodel.enable_vpk_sync(vpk)
+        
+        def on_delete_click(e):
+            """Handle delete button click"""
+            print(f"_build_local_vpk_item: deleting {vpk.name}")
+            self._viewmodel.delete_vpk_sync(vpk)
+        
+        if vpk.is_disabled:
+            # Show "Enable" and "Delete" buttons for disabled files
+            action_buttons = ft.Row([
+                ft.IconButton(
+                    icon=ft.icons.CHECK_CIRCLE,
+                    tooltip='Enable',
+                    on_click=on_enable_click,
+                    icon_color='#4caf50',
+                ),
+                ft.IconButton(
+                    icon=ft.icons.DELETE,
+                    tooltip='Delete',
+                    on_click=on_delete_click,
+                    icon_color='#f44336',
+                ),
+            ], spacing=5)
+        else:
+            # Show "Disable" and "Delete" buttons for enabled files
+            action_buttons = ft.Row([
+                ft.IconButton(
+                    icon=ft.icons.BLOCK,
+                    tooltip='Disable',
+                    on_click=on_disable_click,
+                    icon_color='#ff9800',
+                ),
+                ft.IconButton(
+                    icon=ft.icons.DELETE,
+                    tooltip='Delete',
+                    on_click=on_delete_click,
+                    icon_color='#f44336',
+                ),
+            ], spacing=5)
+        
+        # Build filename and info with action buttons
+        item_content = ft.Row([
+            thumbnail,
+            file_info,
+            action_buttons,
+        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER, opacity=0.6 if vpk.is_disabled else 1.0)
+        
+        # Apply disabled visual style if disabled
+        bgcolor = '#2d2d2d'
+        if vpk.is_disabled:
+            bgcolor = '#1a1a1a'
+        
+        return ft.Container(
+            content=item_content,
+            padding=10,
+            border_radius=4,
+            bgcolor=bgcolor,
+        )
+    
+    def _build_workshop_item(self, workshop: VpkFile) -> ft.Container:
+        """Build a single workshop item with thumbnail and filename"""
+        # Build thumbnail image or placeholder
+        if workshop.thumbnail_path:
+            thumbnail = ft.Image(
+                src=workshop.thumbnail_path,
+                width=120,
+                height=120,
+                fit=ft.ImageFit.CONTAIN,
+            )
+        else:
+            # Show placeholder if no thumbnail
+            thumbnail = ft.Container(
+                content=ft.Icon(ft.icons.IMAGE_NOT_SUPPORTED, size=50, color='#666666'),
+                width=120,
+                height=120,
+                bgcolor='#3a3a3a',
+                border_radius=8,
+                alignment=ft.alignment.center,
+            )
+        
+        # Build filename and info
+        name_text_color = '#888888' if workshop.is_disabled else '#ffffff'
+        info_text_color = '#666666' if workshop.is_disabled else '#a0a0a0'
+        
+        item_content = ft.Row([
+            thumbnail,
+            ft.Column([
+                ft.Row([
+                    ft.Text(workshop.name, weight='bold', size=12, color=name_text_color),
+                    ft.Container(
+                        content=ft.Text('已禁用', size=9, color='#ffffff', weight='bold'),
+                        bgcolor='#f44336',
+                        padding=ft.padding.symmetric(horizontal=6, vertical=2),
+                        border_radius=4,
+                        visible=workshop.is_disabled,
+                    ),
+                ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                ft.Text(
+                    localization.t('fileSize', size=f'{workshop.size / (1024*1024):.2f}'),
+                    size=11,
+                    color=info_text_color,
+                ),
+            ], tight=True, expand=True),
+        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER, opacity=0.6 if workshop.is_disabled else 1.0)
+        
+        return ft.Container(
+            content=item_content,
+            padding=10,
+            border_radius=4,
+            bgcolor='#1a1a1a' if workshop.is_disabled else '#2d2d2d',
         )
     
     def _on_folder_selected(self, e: ft.FilePickerResultEvent):
@@ -287,17 +455,50 @@ class VpkManagerScreen:
             self._page.update()
     
     def set_page(self, page: ft.Page):
-        """Set page reference for dialogs"""
+        """Set page reference for dialogs and file pickers"""
         self._page = page
-        # Add file picker to page
+        # Add file pickers to page
         if self._folder_picker not in self._page.overlay:
             self._page.overlay.append(self._folder_picker)
+        if self._archive_picker not in self._page.overlay:
+            self._page.overlay.append(self._archive_picker)
     
     def _on_state_changed(self):
         """Handle state changes from ViewModel"""
         # Rebuild the content area when state changes
-        if self._page:
+        print(f"_on_state_changed: called, is_loading={self._viewmodel.is_loading}")
+        if self._page and self._main_column:
+            # Rebuild the content area with new data
+            print(f"_on_state_changed: rebuilding content area")
+            new_content_area = self._build_content_area()
+            # Replace the second element (index 1) of the column with new content area
+            self._main_column.controls[1] = new_content_area
+            print(f"_on_state_changed: calling page.update()")
             self._page.update()
+            print(f"_on_state_changed: page.update() completed")
+    
+    def _on_archive_selected(self, e: ft.FilePickerResultEvent):
+        """Handle archive file selection from file picker"""
+        if e.files:
+            selected_file = e.files[0]
+            file_path = selected_file.path
+            
+            print(f"_on_archive_selected: selected file: {file_path}")
+            
+            # Check if directory is selected
+            if not self._current_directory:
+                self._viewmodel._error_message = 'Please select a game directory first'
+                print(f"_on_archive_selected: no directory selected")
+                self._on_state_changed()
+                return
+            
+            # Extract archive (this will trigger load_vpk_files_sync and notify_listeners)
+            print(f"_on_archive_selected: calling extract_archive_sync()")
+            success = self._viewmodel.extract_archive_sync(file_path)
+            print(f"_on_archive_selected: extract result: {success}")
+            print(f"_on_archive_selected: waiting for notify_listeners() to trigger _on_state_changed()")
+            
+            # The notify_listeners() from extract_archive_sync will trigger _on_state_changed()
     
     def dispose(self):
         """Clean up resources"""
