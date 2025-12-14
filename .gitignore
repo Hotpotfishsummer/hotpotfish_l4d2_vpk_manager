@@ -144,3 +144,4 @@ Thumbs.db
 *.vpk
 .vscode/settings.json
 .vscode/extensions.json
+tmp/

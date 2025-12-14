@@ -133,7 +133,7 @@ class VpkManagerScreen:
         # Content with upload button
         content_with_upload = ft.Column([
             ft.Row([
-                ft.Text(localization.t('localVpkFiles') if localization.t('localVpkFiles') != 'localVpkFiles' else 'Local VPK Files', weight='bold', expand=True),
+                ft.Text(localization.t('localVpkFiles') if localization.t('localVpkFiles') != 'localVpkFiles' else 'Local VPK Files', weight=ft.FontWeight.BOLD, expand=True),
                 upload_button,
             ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             local_vpk_content,
@@ -143,7 +143,7 @@ class VpkManagerScreen:
             header=ft.ListTile(
                 title=ft.Text(
                     f"{localization.t('localVpkFiles')} ({len(self._viewmodel.vpk_files)})",
-                    weight='bold',
+                    weight=ft.FontWeight.BOLD,
                     size=14,
                     color='#ffffff',
                 ),
@@ -177,7 +177,7 @@ class VpkManagerScreen:
             header=ft.ListTile(
                 title=ft.Text(
                     f"{localization.t('workshopFiles')} ({len(self._viewmodel.workshop_files)})",
-                    weight='bold',
+                    weight=ft.FontWeight.BOLD,
                     size=14,
                     color='#ffffff',
                 ),
@@ -247,11 +247,17 @@ class VpkManagerScreen:
         name_text_color = '#888888' if vpk.is_disabled else '#ffffff'
         info_text_color = '#666666' if vpk.is_disabled else '#a0a0a0'
         
+        # Build title with addontitle if available
+        title_parts = [vpk.name]
+        if vpk.addontitle:
+            title_parts.append(f" - {vpk.addontitle}")
+        title_text = ''.join(title_parts)
+        
         file_info = ft.Column([
             ft.Row([
-                ft.Text(vpk.name, weight='bold', size=12, color=name_text_color),
+                ft.Text(title_text, weight=ft.FontWeight.BOLD, size=12, color=name_text_color),
                 ft.Container(
-                    content=ft.Text('已禁用', size=9, color='#ffffff', weight='bold'),
+                    content=ft.Text('已禁用', size=9, color='#ffffff', weight=ft.FontWeight.BOLD),
                     bgcolor='#f44336',
                     padding=ft.padding.symmetric(horizontal=6, vertical=2),
                     border_radius=4,
@@ -358,13 +364,19 @@ class VpkManagerScreen:
         name_text_color = '#888888' if workshop.is_disabled else '#ffffff'
         info_text_color = '#666666' if workshop.is_disabled else '#a0a0a0'
         
+        # Build title with addontitle if available
+        title_parts = [workshop.name]
+        if workshop.addontitle:
+            title_parts.append(f" - {workshop.addontitle}")
+        title_text = ''.join(title_parts)
+        
         item_content = ft.Row([
             thumbnail,
             ft.Column([
                 ft.Row([
-                    ft.Text(workshop.name, weight='bold', size=12, color=name_text_color),
+                    ft.Text(title_text, weight=ft.FontWeight.BOLD, size=12, color=name_text_color),
                     ft.Container(
-                        content=ft.Text('已禁用', size=9, color='#ffffff', weight='bold'),
+                        content=ft.Text('已禁用', size=9, color='#ffffff', weight=ft.FontWeight.BOLD),
                         bgcolor='#f44336',
                         padding=ft.padding.symmetric(horizontal=6, vertical=2),
                         border_radius=4,
@@ -427,7 +439,7 @@ class VpkManagerScreen:
                 ft.TextButton(localization.t('cancel'), on_click=lambda e: self._close_dialog(dialog)),
                 ft.TextButton(
                     localization.t('ok'),
-                    on_click=lambda e: self._handle_path_selected(path_input.value, dialog),
+                    on_click=lambda e: self._handle_path_selected(path_input.value or '', dialog),
                 ),
             ],
         )

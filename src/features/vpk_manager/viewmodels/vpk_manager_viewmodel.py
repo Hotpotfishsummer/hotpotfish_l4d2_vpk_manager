@@ -2,11 +2,12 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import zipfile
 import shutil
 from core.viewmodels.base_viewmodel import BaseViewModel
 from core.services.storage_service import StorageService
+from features.vpk_manager.services.vpk_metadata_service import VpkMetadataService
 
 try:
     import py7zr
@@ -23,8 +24,9 @@ class VpkFile:
     size: int
     modified_time: str
     is_valid: bool = True
-    thumbnail_path: str = None  # Path to thumbnail image (.jpg)
+    thumbnail_path: Optional[str] = None  # Path to thumbnail image (.jpg)
     is_disabled: bool = False  # Whether the VPK is disabled (.vpk.disabled)
+    addontitle: Optional[str] = None  # Add-on title extracted from addoninfo.txt
 
 
 class VpkManagerViewModel(BaseViewModel):
@@ -35,6 +37,7 @@ class VpkManagerViewModel(BaseViewModel):
     def __init__(self):
         super().__init__()
         self._storage = StorageService()
+        self._metadata_service: Optional[VpkMetadataService] = None
         
         # State
         self._directory_path: str = self._storage.get(self.STORAGE_KEY_DIRECTORY, '')
@@ -42,7 +45,7 @@ class VpkManagerViewModel(BaseViewModel):
         self._workshop_files: List[VpkFile] = []
         self._is_loading = False
         self._error_message: str = ''
-        self._selected_file: VpkFile = None
+        self._selected_file: Optional[VpkFile] = None
     
     # Getters
     @property
@@ -70,7 +73,7 @@ class VpkManagerViewModel(BaseViewModel):
         return self._error_message
     
     @property
-    def selected_file(self) -> VpkFile:
+    def selected_file(self) -> Optional[VpkFile]:
         return self._selected_file
     
     # Business logic methods
@@ -98,7 +101,7 @@ class VpkManagerViewModel(BaseViewModel):
         """Set the working directory and load VPK files"""
         self._directory_path = directory
         self.notify_listeners()
-        await self.load_vpk_files(directory)
+        self.load_vpk_files_sync(directory)
     
     async def select_file(self, file: VpkFile):
         """Select a VPK file"""
@@ -143,6 +146,17 @@ class VpkManagerViewModel(BaseViewModel):
             print(f"_get_vpk_files: addons directory does not exist: {addons_path}")
             return vpk_files
         
+        # Create hidden config directory at the same level as addons directory
+        config_dir = addons_path.parent / '.vpk_config'
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            print(f"_get_vpk_files: created config directory: {config_dir}")
+        except Exception as e:
+            print(f"_get_vpk_files: failed to create config directory: {e}")
+        
+        # Initialize metadata service
+        self._metadata_service = VpkMetadataService(str(config_dir))
+        
         # Iterate through all .vpk and .vpk.disabled files in addons directory (but not in workshop subdirectory)
         for vpk_file_path in sorted(addons_path.glob('*.vpk*')):
             # Skip workshop directory
@@ -164,16 +178,22 @@ class VpkManagerViewModel(BaseViewModel):
             jpg_path = actual_vpk_path.with_suffix('.jpg')
             thumbnail_path = str(jpg_path) if jpg_path.exists() else None
             
+            # Extract or get cached addontitle
+            addontitle = None
+            if self._metadata_service:
+                addontitle = self._metadata_service.get_addontitle(str(vpk_file_path))
+            
             vpk_file = VpkFile(
                 name=vpk_file_path.name,
                 path=str(vpk_file_path),
                 size=stat.st_size,
                 modified_time=str(stat.st_mtime),
-                thumbnail_path=thumbnail_path,
+                thumbnail_path=thumbnail_path or '',
                 is_disabled=is_disabled,
+                addontitle=addontitle,
             )
             vpk_files.append(vpk_file)
-            print(f"_get_vpk_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, disabled={is_disabled}")
+            print(f"_get_vpk_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, disabled={is_disabled}, addontitle={addontitle}")
         
         print(f"_get_vpk_files: found {len(vpk_files)} local VPK files")
         return vpk_files
@@ -191,6 +211,11 @@ class VpkManagerViewModel(BaseViewModel):
             print(f"_get_workshop_files: workshop directory does not exist: {workshop_path}")
             return workshop_files
         
+        # Ensure metadata service is initialized
+        if not self._metadata_service:
+            config_dir = workshop_path.parent.parent / '.vpk_config'
+            self._metadata_service = VpkMetadataService(str(config_dir))
+        
         # Iterate through all .vpk files in workshop directory
         for vpk_file_path in sorted(workshop_path.glob('*.vpk')):
             stat = vpk_file_path.stat()
@@ -199,15 +224,21 @@ class VpkManagerViewModel(BaseViewModel):
             jpg_path = vpk_file_path.with_suffix('.jpg')
             thumbnail_path = str(jpg_path) if jpg_path.exists() else None
             
+            # Extract or get cached addontitle
+            addontitle = None
+            if self._metadata_service:
+                addontitle = self._metadata_service.get_addontitle(str(vpk_file_path))
+            
             vpk_file = VpkFile(
                 name=vpk_file_path.name,
                 path=str(vpk_file_path),
                 size=stat.st_size,
                 modified_time=str(stat.st_mtime),
-                thumbnail_path=thumbnail_path,
+                thumbnail_path=thumbnail_path or '',
+                addontitle=addontitle,
             )
             workshop_files.append(vpk_file)
-            print(f"_get_workshop_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}")
+            print(f"_get_workshop_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, addontitle={addontitle}")
         
         print(f"_get_workshop_files: found {len(workshop_files)} workshop files")
         return workshop_files
@@ -409,4 +440,4 @@ class VpkManagerViewModel(BaseViewModel):
         super().dispose()
         self._vpk_files.clear()
         self._workshop_files.clear()
-        self._selected_file = None
+        self._selected_file: Optional[VpkFile] = None
