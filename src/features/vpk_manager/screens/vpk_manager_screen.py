@@ -11,6 +11,15 @@ from features.vpk_manager.services.vpk_export_service import VpkExportService
 from core.localization import localization
 
 
+def _safe_print(msg: str):
+    """Safe print that handles encoding errors"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # If encoding fails, replace problematic characters
+        print(msg.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+
+
 class VpkManagerScreen:
     """VPK Manager screen"""
     
@@ -34,10 +43,17 @@ class VpkManagerScreen:
         # Main container reference for dynamic updates
         self._main_column = None
         self._action_buttons_row = None  # Will be created in build()
+        self._export_button = None  # Will be created in build()
+        self._delete_button = None  # Will be created in build()
+        self._selected_count_text = None  # Will be created in build()
+        
+        # Track previous state to detect changes
+        self._previous_is_loading = False
+        self._previous_is_exporting = False
         
         # Load VPK files if directory was saved
         if self._current_directory:
-            print(f"VpkManagerScreen.__init__: loading VPK files from saved directory: {self._current_directory}")
+            _safe_print(f"VpkManagerScreen.__init__: loading VPK files from saved directory: {self._current_directory}")
             self._viewmodel.load_vpk_files_sync(self._current_directory)
     
     def build(self) -> "ft.Container":
@@ -50,9 +66,14 @@ class VpkManagerScreen:
             value=self._current_directory,
         )
         
+        # Create action buttons row (will be at top, fixed position)
+        self._action_buttons_row = self._build_action_buttons()
+        self._action_buttons_row.visible = self._viewmodel.has_selected_files or self._viewmodel.is_exporting
+        
         # Create main column and store reference
         self._main_column = ft.Column([
             self._build_top_bar(self._directory_input),
+            self._action_buttons_row,
             self._build_content_area(),
         ], expand=True, spacing=10)
         
@@ -70,7 +91,7 @@ class VpkManagerScreen:
         
         label_text = localization.t('directoryPathLabel')
         browse_text = localization.t('browseFolder')
-        print(f"_build_top_bar: label='{label_text}', browse='{browse_text}'")
+        _safe_print(f"_build_top_bar: label='{label_text}', browse='{browse_text}'")
         
         directory_input.label = label_text
         
@@ -110,20 +131,10 @@ class VpkManagerScreen:
         # Build the expansion list
         expansion_list = self._build_expansion_list()
         
-        # Build action buttons row
-        action_buttons_row = self._build_action_buttons()
-        action_buttons_row.visible = self._viewmodel.has_selected_files or self._viewmodel.is_exporting
-        
-        # Store reference for later updates
-        self._action_buttons_row = action_buttons_row
-        
-        # Wrap in a scrollable column with action buttons
+        # Wrap in a scrollable container with Column for proper scrolling
         return ft.Container(
             content=ft.Column(
-                controls=[
-                    action_buttons_row,
-                    expansion_list,
-                ],
+                controls=[expansion_list],
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
             ),
@@ -251,15 +262,15 @@ class VpkManagerScreen:
         def on_export_click(e):
             """Handle export button click"""
             if self._viewmodel.is_exporting:
-                print("on_export_click: already exporting, ignoring click")
+                _safe_print("on_export_click: already exporting, ignoring click")
                 return
             
             selected_files = self._viewmodel.get_selected_files()
             if not selected_files:
-                print("on_export_click: no files selected")
+                _safe_print("on_export_click: no files selected")
                 return
             
-            print(f"on_export_click: exporting {len(selected_files)} files")
+            _safe_print(f"on_export_click: exporting {len(selected_files)} files")
             downloads_dir = VpkExportService.get_downloads_directory()
             # Use the ViewModel's export method which handles state management
             self._viewmodel.export_selected_vpk_files_sync(downloads_dir)
@@ -267,15 +278,15 @@ class VpkManagerScreen:
         def on_delete_click(e):
             """Handle delete selected files button click"""
             if self._viewmodel.is_exporting:
-                print("on_delete_click: already processing, ignoring click")
+                _safe_print("on_delete_click: already processing, ignoring click")
                 return
             
             selected_files = self._viewmodel.get_selected_files()
             if not selected_files:
-                print("on_delete_click: no files selected")
+                _safe_print("on_delete_click: no files selected")
                 return
             
-            print(f"on_delete_click: deleting {len(selected_files)} files")
+            _safe_print(f"on_delete_click: deleting {len(selected_files)} files")
             # Use the ViewModel's delete method which handles state management
             self._viewmodel.delete_selected_vpk_files_sync()
         
@@ -294,24 +305,28 @@ class VpkManagerScreen:
             )
         else:
             # Show normal buttons when not exporting
+            self._export_button = ft.ElevatedButton(
+                text='导出',
+                icon=ft.Icons.DOWNLOAD,
+                on_click=on_export_click,
+                bgcolor='#4caf50',
+                color='white',
+                disabled=not self._viewmodel.has_selected_files,
+            )
+            self._delete_button = ft.ElevatedButton(
+                text='删除',
+                icon=ft.Icons.DELETE,
+                on_click=on_delete_click,
+                bgcolor='#f44336',
+                color='white',
+                disabled=not self._viewmodel.has_selected_files,
+            )
+            self._selected_count_text = ft.Text(f"已选择 {self._viewmodel.selected_count} 项", expand=True)
+            
             buttons.extend([
-                ft.ElevatedButton(
-                    text='导出',
-                    icon=ft.Icons.DOWNLOAD,
-                    on_click=on_export_click,
-                    bgcolor='#4caf50',
-                    color='white',
-                    disabled=not self._viewmodel.has_selected_files,
-                ),
-                ft.ElevatedButton(
-                    text='删除',
-                    icon=ft.Icons.DELETE,
-                    on_click=on_delete_click,
-                    bgcolor='#f44336',
-                    color='white',
-                    disabled=not self._viewmodel.has_selected_files,
-                ),
-                ft.Text(f"已选择 {self._viewmodel.selected_count} 项", expand=True),
+                self._export_button,
+                self._delete_button,
+                self._selected_count_text,
             ])
         
         return ft.Row(buttons, spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
@@ -332,7 +347,7 @@ class VpkManagerScreen:
         else:
             # Show placeholder if no thumbnail
             thumbnail = ft.Container(
-                content=ft.Icon(ft.icons.IMAGE_NOT_SUPPORTED, size=50, color='#666666'),
+                content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED, size=50, color='#666666'),
                 width=120,
                 height=120,
                 bgcolor='#3a3a3a',
@@ -371,22 +386,22 @@ class VpkManagerScreen:
         # Create action buttons based on disabled state
         def on_checkbox_change(e):
             """Handle checkbox change"""
-            print(f"_build_local_vpk_item: checkbox changed for {vpk.name}, value={e.control.value}")
+            _safe_print(f"_build_local_vpk_item: checkbox changed for {vpk.name}, value={e.control.value}")
             self._viewmodel.toggle_vpk_selection(vpk)
         
         def on_disable_click(e):
             """Handle disable button click"""
-            print(f"_build_local_vpk_item: disabling {vpk.name}")
+            _safe_print(f"_build_local_vpk_item: disabling {vpk.name}")
             self._viewmodel.disable_vpk_sync(vpk)
         
         def on_enable_click(e):
             """Handle enable button click"""
-            print(f"_build_local_vpk_item: enabling {vpk.name}")
+            _safe_print(f"_build_local_vpk_item: enabling {vpk.name}")
             self._viewmodel.enable_vpk_sync(vpk)
         
         def on_delete_click(e):
             """Handle delete button click"""
-            print(f"_build_local_vpk_item: deleting {vpk.name}")
+            _safe_print(f"_build_local_vpk_item: deleting {vpk.name}")
             self._viewmodel.delete_vpk_sync(vpk)
         
         # Checkbox for selection
@@ -485,7 +500,7 @@ class VpkManagerScreen:
         # Checkbox for selection
         def on_checkbox_change(e):
             """Handle checkbox change"""
-            print(f"_build_workshop_item: checkbox changed for {workshop.name}, value={e.control.value}")
+            _safe_print(f"_build_workshop_item: checkbox changed for {workshop.name}, value={e.control.value}")
             self._viewmodel.toggle_workshop_selection(workshop)
         
         checkbox = ft.Checkbox(
@@ -526,21 +541,21 @@ class VpkManagerScreen:
         """Handle folder selection from system file picker"""
         if e.path:
             self._current_directory = e.path
-            print(f"_on_folder_selected: selected path={e.path}")
+            _safe_print(f"_on_folder_selected: selected path={e.path}")
             
             # Update the directory_input TextField directly
             if self._directory_input:
                 self._directory_input.value = e.path
-                print(f"_on_folder_selected: updated _directory_input.value to {e.path}")
+                _safe_print(f"_on_folder_selected: updated _directory_input.value to {e.path}")
             
             # Update ViewModel to load VPK files
             self._viewmodel.set_directory_sync(e.path)
-            print(f"_on_folder_selected: called set_directory_sync({e.path})")
+            _safe_print(f"_on_folder_selected: called set_directory_sync({e.path})")
             
             # Trigger UI update
             if self._page:
                 self._page.update()
-                print(f"_on_folder_selected: called page.update()")
+                _safe_print(f"_on_folder_selected: called page.update()")
     
     def _show_folder_picker(self):
         """Show system folder picker"""
@@ -601,17 +616,47 @@ class VpkManagerScreen:
     
     def _on_state_changed(self):
         """Handle state changes from ViewModel"""
-        # Rebuild the content area when state changes
-        print(f"_on_state_changed: called, is_loading={self._viewmodel.is_loading}, is_exporting={self._viewmodel.is_exporting}, selected_count={self._viewmodel.selected_count}")
+        # Handle state changes from ViewModel
+        _safe_print(f"_on_state_changed: called, is_loading={self._viewmodel.is_loading}, is_exporting={self._viewmodel.is_exporting}, selected_count={self._viewmodel.selected_count}")
+        
+        # Check if loading or exporting state changed
+        loading_state_changed = self._previous_is_loading != self._viewmodel.is_loading
+        exporting_state_changed = self._previous_is_exporting != self._viewmodel.is_exporting
+        self._previous_is_loading = self._viewmodel.is_loading
+        self._previous_is_exporting = self._viewmodel.is_exporting
+        
         if self._page and self._main_column:
-            # Rebuild the content area with new data
-            print(f"_on_state_changed: rebuilding content area")
-            new_content_area = self._build_content_area()
-            # Replace the second element (index 1) of the column with new content area
-            self._main_column.controls[1] = new_content_area
-            print(f"_on_state_changed: calling page.update()")
-            self._page.update()
-            print(f"_on_state_changed: page.update() completed")
+            # If loading or exporting state changed, rebuild the content area (index 2)
+            # This is needed when switching from/to loading, exporting states
+            if loading_state_changed or exporting_state_changed:
+                _safe_print(f"_on_state_changed: loading_state_changed={loading_state_changed}, exporting_state_changed={exporting_state_changed}, rebuilding content area")
+                new_content_area = self._build_content_area()
+                self._main_column.controls[2] = new_content_area
+                self._page.update()
+                _safe_print(f"_on_state_changed: page.update() completed (state changed)")
+            elif self._action_buttons_row:
+                # Only update action buttons visibility and disabled state when state didn't change
+                # This prevents scrolling to top when checkbox is clicked
+                self._action_buttons_row.visible = self._viewmodel.has_selected_files or self._viewmodel.is_exporting
+                
+                # Update button states and text
+                if self._export_button and self._delete_button and self._selected_count_text:
+                    self._export_button.disabled = not self._viewmodel.has_selected_files
+                    self._delete_button.disabled = not self._viewmodel.has_selected_files
+                    self._selected_count_text.value = f"已选择 {self._viewmodel.selected_count} 项"
+                    _safe_print(f"_on_state_changed: updated button disabled states - has_selected={self._viewmodel.has_selected_files}")
+                
+                _safe_print(f"_on_state_changed: updating action buttons")
+                self._page.update()
+                _safe_print(f"_on_state_changed: page.update() completed")
+            else:
+                # If action_buttons_row is not yet created (initial load), rebuild content area
+                _safe_print(f"_on_state_changed: action_buttons_row not ready, rebuilding content area")
+                new_content_area = self._build_content_area()
+                self._main_column.controls[2] = new_content_area
+                _safe_print(f"_on_state_changed: calling page.update()")
+                self._page.update()
+                _safe_print(f"_on_state_changed: page.update() completed")
     
     def _on_archive_selected(self, e: "ft.FilePickerResultEvent"):
         """Handle archive file selection from file picker"""
@@ -619,7 +664,7 @@ class VpkManagerScreen:
             selected_file = e.files[0]
             file_path = selected_file.path
             
-            print(f"_on_archive_selected: selected file: {file_path}")
+            _safe_print(f"_on_archive_selected: selected file: {file_path}")
             
             # Check if directory is selected
             if not self._current_directory:

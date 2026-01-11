@@ -23,6 +23,15 @@ except ImportError:
     HAS_ZSTD = False
 
 
+def _safe_print(msg: str):
+    """Safe print that handles encoding errors"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # If encoding fails, replace problematic characters
+        print(msg.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+
+
 @dataclass
 class VpkFile:
     """VPK file data model"""
@@ -135,7 +144,7 @@ class VpkManagerViewModel(BaseViewModel):
         """Set the working directory and load VPK files (synchronous)"""
         self._directory_path = directory
         self._storage.set(self.STORAGE_KEY_DIRECTORY, directory)
-        print(f"set_directory_sync: saved directory to storage: {directory}")
+        _safe_print(f"set_directory_sync: saved directory to storage: {directory}")
         self.notify_listeners()
         self.load_vpk_files_sync(directory)
     
@@ -197,19 +206,19 @@ class VpkManagerViewModel(BaseViewModel):
         # Construct path to addons directory: directory\\left4dead2\\addons
         addons_path = Path(directory) / 'left4dead2' / 'addons'
         
-        print(f"_get_vpk_files: checking addons path: {addons_path}")
+        _safe_print(f"_get_vpk_files: checking addons path: {addons_path}")
         
         if not addons_path.exists():
-            print(f"_get_vpk_files: addons directory does not exist: {addons_path}")
+            _safe_print(f"_get_vpk_files: addons directory does not exist: {addons_path}")
             return vpk_files
         
         # Create hidden config directory at the same level as addons directory
         config_dir = addons_path.parent / '.vpk_config'
         try:
             config_dir.mkdir(parents=True, exist_ok=True)
-            print(f"_get_vpk_files: created config directory: {config_dir}")
+            _safe_print(f"_get_vpk_files: created config directory: {config_dir}")
         except Exception as e:
-            print(f"_get_vpk_files: failed to create config directory: {e}")
+            _safe_print(f"_get_vpk_files: failed to create config directory: {e}")
         
         # Initialize metadata service
         self._metadata_service = VpkMetadataService(str(config_dir))
@@ -250,9 +259,9 @@ class VpkManagerViewModel(BaseViewModel):
                 addontitle=addontitle,
             )
             vpk_files.append(vpk_file)
-            print(f"_get_vpk_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, disabled={is_disabled}, addontitle={addontitle}")
+            _safe_print(f"_get_vpk_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, disabled={is_disabled}, addontitle={addontitle}")
         
-        print(f"_get_vpk_files: found {len(vpk_files)} local VPK files")
+        _safe_print(f"_get_vpk_files: found {len(vpk_files)} local VPK files")
         return vpk_files
     
     def _get_workshop_files(self, directory: str) -> List[VpkFile]:
@@ -262,10 +271,10 @@ class VpkManagerViewModel(BaseViewModel):
         # Construct path to workshop directory: directory\\left4dead2\\addons\\workshop
         workshop_path = Path(directory) / 'left4dead2' / 'addons' / 'workshop'
         
-        print(f"_get_workshop_files: checking workshop path: {workshop_path}")
+        _safe_print(f"_get_workshop_files: checking workshop path: {workshop_path}")
         
         if not workshop_path.exists():
-            print(f"_get_workshop_files: workshop directory does not exist: {workshop_path}")
+            _safe_print(f"_get_workshop_files: workshop directory does not exist: {workshop_path}")
             return workshop_files
         
         # Ensure metadata service is initialized
@@ -295,9 +304,9 @@ class VpkManagerViewModel(BaseViewModel):
                 addontitle=addontitle,
             )
             workshop_files.append(vpk_file)
-            print(f"_get_workshop_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, addontitle={addontitle}")
+            _safe_print(f"_get_workshop_files: found {vpk_file_path.name}, thumbnail={thumbnail_path}, addontitle={addontitle}")
         
-        print(f"_get_workshop_files: found {len(workshop_files)} workshop files")
+        _safe_print(f"_get_workshop_files: found {len(workshop_files)} workshop files")
         return workshop_files
     
     def _extract_vpk(self, file_path: str, output_dir: str) -> bool:
@@ -306,7 +315,7 @@ class VpkManagerViewModel(BaseViewModel):
             # Placeholder for VPK extraction logic
             return True
         except Exception as e:
-            print(f"Error extracting VPK: {e}")
+            _safe_print(f"Error extracting VPK: {e}")
             return False
     
     def _set_loading(self, loading: bool):
@@ -343,21 +352,22 @@ class VpkManagerViewModel(BaseViewModel):
             
             if success:
                 # Reload VPK files after extraction
-                print(f"extract_archive_sync: reloading VPK files after extraction")
+                _safe_print(f"extract_archive_sync: reloading VPK files after extraction")
                 self._vpk_files = self._get_vpk_files(self._directory_path)
                 self._workshop_files = self._get_workshop_files(self._directory_path)
                 self._error_message = ''
-                print(f"extract_archive_sync: extraction and reload completed successfully")
-                print(f"extract_archive_sync: {len(self._vpk_files)} local VPK files, {len(self._workshop_files)} workshop files")
+                _safe_print(f"extract_archive_sync: extraction and reload completed successfully")
+                _safe_print(f"extract_archive_sync: {len(self._vpk_files)} local VPK files, {len(self._workshop_files)} workshop files")
             
             return success
         except Exception as e:
             self._error_message = f'Error extracting archive: {str(e)}'
-            print(f"extract_archive_sync: {self._error_message}")
+            _safe_print(f"extract_archive_sync: {self._error_message}")
             return False
         finally:
             self._set_loading(False)
-            print(f"extract_archive_sync: calling notify_listeners()")
+            _safe_print(f"extract_archive_sync: calling notify_listeners()")
+            self.notify_listeners()
     
     def _extract_zip(self, zip_path: str) -> bool:
         """Extract ZIP archive to local addons directory (overwrite existing files)"""
@@ -367,7 +377,7 @@ class VpkManagerViewModel(BaseViewModel):
             # Ensure addons directory exists
             addons_path.mkdir(parents=True, exist_ok=True)
             
-            print(f"_extract_zip: extracting {zip_path} to {addons_path}")
+            _safe_print(f"_extract_zip: extracting {zip_path} to {addons_path}")
             
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 # extractall() will overwrite existing files by default
@@ -375,24 +385,24 @@ class VpkManagerViewModel(BaseViewModel):
                 
                 # Log extracted files
                 extracted_files = zip_ref.namelist()
-                print(f"_extract_zip: extracted {len(extracted_files)} file(s)")
+                _safe_print(f"_extract_zip: extracted {len(extracted_files)} file(s)")
                 for file in extracted_files[:10]:  # Log first 10 files
                     print(f"  - {file}")
                 if len(extracted_files) > 10:
-                    print(f"  ... and {len(extracted_files) - 10} more file(s)")
+                    _safe_print(f"  ... and {len(extracted_files) - 10} more file(s)")
             
-            print(f"_extract_zip: successfully completed")
+            _safe_print(f"_extract_zip: successfully completed")
             return True
         except Exception as e:
             self._error_message = f'Error extracting ZIP: {str(e)}'
-            print(f"_extract_zip: {self._error_message}")
+            _safe_print(f"_extract_zip: {self._error_message}")
             return False
     
     def _extract_7z(self, seven_z_path: str) -> bool:
         """Extract 7Z archive to local addons directory (overwrite existing files)"""
         if not HAS_7ZR:
             self._error_message = 'py7zr library not installed. Install with: pip install py7zr'
-            print(f"_extract_7z: {self._error_message}")
+            _safe_print(f"_extract_7z: {self._error_message}")
             return False
         
         try:
@@ -401,7 +411,7 @@ class VpkManagerViewModel(BaseViewModel):
             # Ensure addons directory exists
             addons_path.mkdir(parents=True, exist_ok=True)
             
-            print(f"_extract_7z: extracting {seven_z_path} to {addons_path}")
+            _safe_print(f"_extract_7z: extracting {seven_z_path} to {addons_path}")
             
             with py7zr.SevenZipFile(seven_z_path, 'r') as archive:
                 # extractall() will overwrite existing files by default
@@ -409,24 +419,24 @@ class VpkManagerViewModel(BaseViewModel):
                 
                 # Log archive info
                 all_names = archive.getnames()
-                print(f"_extract_7z: extracted {len(all_names)} file(s)")
+                _safe_print(f"_extract_7z: extracted {len(all_names)} file(s)")
                 for file in all_names[:10]:  # Log first 10 files
-                    print(f"  - {file}")
+                    _safe_print(f"  - {file}")
                 if len(all_names) > 10:
-                    print(f"  ... and {len(all_names) - 10} more file(s)")
+                    _safe_print(f"  ... and {len(all_names) - 10} more file(s)")
             
-            print(f"_extract_7z: successfully completed")
+            _safe_print(f"_extract_7z: successfully completed")
             return True
         except Exception as e:
             self._error_message = f'Error extracting 7Z: {str(e)}'
-            print(f"_extract_7z: {self._error_message}")
+            _safe_print(f"_extract_7z: {self._error_message}")
             return False
     
     def _extract_tar_zst(self, tar_zst_path: str) -> bool:
         """Extract TAR.ZST archive to local addons directory (overwrite existing files)"""
         if not HAS_ZSTD:
             self._error_message = 'zstandard library not installed. Install with: pip install zstandard'
-            print(f"_extract_tar_zst: {self._error_message}")
+            _safe_print(f"_extract_tar_zst: {self._error_message}")
             return False
         
         try:

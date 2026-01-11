@@ -1,0 +1,15 @@
+{
+  "app_name": "L4D2 VPK Manager",
+  "app_description": "A tool to manage Left 4 Dead 2 VPK files",
+  "app_version": "1.0.0",
+  "module_name": "main",
+  "assets_dir": "assets",
+  "build": {
+    "windows": {
+      "include_files": [
+        "assets",
+        "src"
+      ]
+    }
+  }
+}

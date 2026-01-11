@@ -6,6 +6,15 @@ from typing import Optional, Dict, Any
 import vpk
 
 
+def _safe_print(msg: str):
+    """Safe print that handles encoding errors"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # If encoding fails, replace problematic characters
+        print(msg.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+
+
 class VpkMetadataService:
     """Service for extracting and caching VPK metadata"""
     
@@ -27,7 +36,7 @@ class VpkMetadataService:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"load_metadata: failed to load JSON {json_path}: {e}")
+                _safe_print(f"load_metadata: failed to load JSON {json_path}: {e}")
         return None
     
     def save_metadata(self, vpk_file_path: str, metadata: Optional[Dict[str, Any]]) -> bool:
@@ -36,10 +45,10 @@ class VpkMetadataService:
         try:
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(metadata or {}, f, ensure_ascii=False, indent=2)
-            print(f"save_metadata: saved metadata to {json_path}")
+            _safe_print(f"save_metadata: saved metadata to {json_path}")
             return True
         except Exception as e:
-            print(f"save_metadata: failed to save JSON {json_path}: {e}")
+            _safe_print(f"save_metadata: failed to save JSON {json_path}: {e}")
             return False
     
     def extract_addontitle(self, vpk_file_path: str) -> Optional[str]:
@@ -50,14 +59,26 @@ class VpkMetadataService:
             
             # Look for addoninfo.txt in the VPK
             if 'addoninfo.txt' in vpk_file:
-                addoninfo_data = vpk_file['addoninfo.txt'].read().decode('utf-8', errors='ignore')
+                # Try multiple encodings to handle various character sets
+                addoninfo_data = None
+                for encoding in ['utf-8', 'utf-16', 'gbk', 'latin-1']:
+                    try:
+                        addoninfo_data = vpk_file['addoninfo.txt'].read().decode(encoding)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                
+                # If all encodings fail, use utf-8 with error handling
+                if addoninfo_data is None:
+                    addoninfo_data = vpk_file['addoninfo.txt'].read().decode('utf-8', errors='replace')
+                
                 addontitle = self._parse_addontitle(addoninfo_data)
                 return addontitle
             else:
-                print(f"extract_addontitle: addoninfo.txt not found in {vpk_file_path}")
+                _safe_print(f"extract_addontitle: addoninfo.txt not found in {vpk_file_path}")
                 return None
         except Exception as e:
-            print(f"extract_addontitle: failed to extract from {vpk_file_path}: {e}")
+            _safe_print(f"extract_addontitle: failed to extract from {vpk_file_path}: {e}")
             return None
     
     def _parse_addontitle(self, addoninfo_content: str) -> Optional[str]:
@@ -73,7 +94,7 @@ class VpkMetadataService:
                         return parts[1]
             return None
         except Exception as e:
-            print(f"_parse_addontitle: failed to parse addoninfo content: {e}")
+            _safe_print(f"_parse_addontitle: failed to parse addoninfo content: {e}")
             return None
     
     def get_or_extract_metadata(self, vpk_file_path: str) -> Optional[Dict[str, Any]]:
@@ -81,11 +102,11 @@ class VpkMetadataService:
         # First, try to load from JSON cache
         cached_metadata = self.load_metadata(vpk_file_path)
         if cached_metadata is not None:
-            print(f"get_or_extract_metadata: using cached metadata for {vpk_file_path}")
+            _safe_print(f"get_or_extract_metadata: using cached metadata for {vpk_file_path}")
             return cached_metadata
         
         # If not cached, extract from VPK
-        print(f"get_or_extract_metadata: extracting metadata from {vpk_file_path}")
+        _safe_print(f"get_or_extract_metadata: extracting metadata from {vpk_file_path}")
         addontitle = self.extract_addontitle(vpk_file_path)
         
         # Create metadata dict (even if empty for error cases)
